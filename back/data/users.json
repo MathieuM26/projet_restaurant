@@ -1,0 +1,30 @@
+[
+  {
+    "id": "1",
+    "name": "Mathieu Moerman",
+    "email": "mathieu.moerman@restaurant.be",
+    "role": "Admin",
+    "active": true
+  },
+  {
+    "id": "2",
+    "name": "Sarah Vasseur",
+    "email": "sarah.vasseur@restaurant.be",
+    "role": "Staff",
+    "active": true
+  },
+  {
+    "id": "3",
+    "name": "Julien Mercier",
+    "email": "julien.mercier@restaurant.be",
+    "role": "Staff",
+    "active": true
+  },
+  {
+    "id": "4",
+    "name": "Émilie Leclerc",
+    "email": "emilie.leclerc@restaurant.be",
+    "role": "Staff",
+    "active": true
+  }
+]
