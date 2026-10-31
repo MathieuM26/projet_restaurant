@@ -197,6 +197,12 @@ document.getElementById("reservation-form").addEventListener("submit", async (e)
         <h3 class="font-bold text-lg">✅ Réservation confirmée !</h3>
         <p class="mt-1">Table attribuée automatiquement : <strong>${escapeHtml(data.tableName)}</strong></p>
         <p class="mt-1">Votre code unique à conserver : <code class="bg-white px-2 py-1 rounded font-mono font-bold">${escapeHtml(data.id)}</code></p>
+        <p class="mt-3 pt-2 border-t border-emerald-300 text-sm">
+          📧 Email de confirmation envoyé à <strong>${escapeHtml(data.guestEmail)}</strong>.
+          <a href="${API_URL}/reservations/${encodeURIComponent(data.id)}/email" target="_blank" class="ml-1 inline-block bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-semibold hover:bg-emerald-800">
+            Voir l'aperçu du mail
+          </a>
+        </p>
       `;
       document.getElementById("reservation-form").reset();
       dateInput.value = today;
@@ -245,6 +251,11 @@ async function findMyReservation() {
       <p><strong>Table attribuée :</strong> ${escapeHtml(res.tableName)}</p>
       <p><strong>Horaire :</strong> ${startDateObj.toLocaleString("fr-BE")}</p>
       ${res.guestMessage ? `<p><strong>Message :</strong> <span class="italic whitespace-pre-line">${escapeHtml(res.guestMessage)}</span></p>` : ""}
+      <p class="pt-1">
+        <a href="${API_URL}/reservations/${encodeURIComponent(res.id)}/email" target="_blank" class="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline">
+          📧 Voir l'aperçu de l'email envoyé (Mode Démo)
+        </a>
+      </p>
 
       ${res.status !== "Cancelled" ? `
         <div class="flex gap-2 pt-2">
@@ -445,6 +456,7 @@ function renderAdminReservations() {
         }">${translateStatus(r.status)}</span>
       </td>
       <td class="p-3 whitespace-nowrap">
+        <a href="${API_URL}/reservations/${encodeURIComponent(r.id)}/email" target="_blank" class="text-blue-600 hover:underline text-xs mr-2 font-medium" title="Voir l'aperçu de l'email">📧 Mail</a>
         ${r.status !== "Cancelled" ? `
           <button onclick="openAdminEdit('${escapeHtml(r.id)}')" class="text-amber-600 hover:underline text-xs mr-2 font-medium">Modifier</button>
           <button onclick="cancelReservation('${escapeHtml(r.id)}')" class="text-red-600 hover:underline text-xs font-medium">Annuler</button>

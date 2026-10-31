@@ -2,7 +2,7 @@
 
 Projet académique réalisé dans le cadre du **Bachelier en Informatique**.
 
-Application web complète de gestion et de réservation de tables pour un restaurant, incluant un algorithme d'attribution automatique de table en temps réel, une gestion intelligente des conflits horaires et un tableau de bord restaurateur sécurisé par rôles.
+Application web complète de gestion et de réservation de tables pour un restaurant, structurée selon une **architecture 3-tiers (`Router` $\rightarrow$ `Service` $\rightarrow$ `Repository`)**, incluant un algorithme d'attribution automatique de table en temps réel, un service d'envoi d'emails de confirmation (mode démo) et un tableau de bord restaurateur sécurisé par rôles.
 
 ---
 
@@ -47,6 +47,7 @@ L'Espace Restaurateur est sécurisé par rôle. Une sélection rapide en un clic
 ### 1. Espace Client
 * **Réservation instantanée sans création de compte** : saisie des coordonnées, du nombre de couverts (1 à 8 personnes), de la date et du créneau.
 * **Attribution automatique et optimale** : l'algorithme sélectionne automatiquement la plus petite table disponible capable d'accueillir le groupe.
+* **Confirmation par Email (Mode Démo)** : génération automatique d'un email de confirmation, de modification ou d'annulation consultable en un clic via un aperçu Webmail intégré (`/api/reservations/:id/email`).
 * **Espace message & allergies** : champ texte facultatif pour signaler allergies, régimes spéciaux ou occasions particulières.
 * **Code unique séquentiel** : génération automatique d'un identifiant clair et mémorisable (ex: `res-31`, `res-32`).
 * **Consultation, modification et annulation** : le client peut à tout moment retrouver sa réservation via son code, modifier le nombre de couverts, la date, l'heure ou le message, ou annuler avec confirmation.
@@ -59,7 +60,7 @@ L'Espace Restaurateur est sécurisé par rôle. Une sélection rapide en un clic
 * **Planning interactif avec filtres et recherche** :
   * Recherche textuelle instantanée par nom, téléphone, référence (`res-XX`), ou contenu du message.
   * Filtre par statut (*Tous*, *Aujourd'hui*, *En cours*, *Confirmée*, *Terminée*, *Annulée*).
-  * Affichage bien visible des messages et allergies sous forme de badges.
+  * Aperçu direct de l'email envoyé au client (`📧 Mail`).
 * **Plan de salle en temps réel** :
   * Chaque table affiche son statut direct : **🟢 Libre** ou **🔴 Occupée** avec le nom du client actuellement assis.
 * **Gestion des tables** :
@@ -69,24 +70,12 @@ L'Espace Restaurateur est sécurisé par rôle. Une sélection rapide en un clic
 
 ---
 
-## 🧠 Règles Métier & Algorithmes
+## 🏗️ Architecture Backend (3-Tiers) & Règles Métier
 
-1. **Horaires de service contrôlés** :
-   * Service du Midi : 11h30 à 14h00.
-   * Service du Soir : 19h00 à 21h30.
-   * Blocage automatique des dates et créneaux passés.
-2. **Durée de repas et gestion des conflits** :
-   * Chaque réservation réserve la table pour une durée forfaitaire de **1h30** (90 minutes).
-   * L'algorithme vérifie le chevauchement d'intervalles horaires : `(startA < endB) && (endA > startB)`.
-   * En cas de modification d'une réservation, la table actuelle est ignorée dans le test de collision pour ne pas bloquer le client sur son propre créneau.
-3. **Cycle de vie dynamique des statuts** :
-   * **Confirmée** : réservation prévue dans le futur.
-   * **En cours** : le créneau horaire est actif à l'instant présent (le client est à table).
-   * **Terminée** : l'heure de fin du repas est dépassée.
-   * **Annulée** : statut manuel explicite.
-4. **Sécurité & Intégrité** :
-   * Protection contre les failles XSS grâce à l'échappement des entrées utilisateurs (`escapeHtml`).
-   * Calcul propre des identifiants (pas de doublons en cas de suppressions intermédiaires).
+Le serveur backend respecte une séparation stricte des responsabilités :
+1. **Couche `Router` (`back/src/router/`)** : réception des requêtes HTTP, extraction des paramètres et envoi des codes de statut HTTP (`200`, `201`, `400`, `404`, `409`).
+2. **Couche `Service` (`back/src/services/`)** : logique métier, validation des horaires d'ouverture, orchestration et déclenchement de l'envoi d'emails via `mail.service.js`.
+3. **Couche `Repository` (`back/src/repository/`)** : accès aux données, algorithme de recherche de tables libres et persistance sur disque (`back/data/*.json`).
 
 ---
 
@@ -100,16 +89,21 @@ projet_restaurant/
 │   ├── package.json        # Dépendances (Express, CORS)
 │   └── src/
 │       ├── index.js        # Point d'entrée de l'API & middlewares
-│       ├── storage/
-│       │   └── jsonStorage.js             # Gestionnaire de lecture/écriture des fichiers JSON
-│       ├── repository/
-│       │   ├── reservationMemory.repository.js  # Métier & persistance réservations
-│       │   ├── tableMemory.repository.js        # Métier & persistance tables
-│       │   └── userMemory.repository.js         # Métier & persistance utilisateurs
-│       └── router/
-│           ├── reservation.router.js      # Routes /api/reservations
-│           ├── tables.router.js           # Routes /api/tables
-│           └── user.router.js             # Routes /api/users & /api/users/login
+│       ├── router/         # Couche HTTP (Routes Express)
+│       │   ├── reservation.router.js
+│       │   ├── tables.router.js
+│       │   └── user.router.js
+│       ├── services/       # Couche Métier (Validations, orchestration, emails)
+│       │   ├── mail.service.js
+│       │   ├── reservation.service.js
+│       │   ├── table.service.js
+│       │   └── user.service.js
+│       ├── repository/     # Couche d'accès aux données (Repositories)
+│       │   ├── reservationMemory.repository.js
+│       │   ├── tableMemory.repository.js
+│       │   └── userMemory.repository.js
+│       └── storage/
+│           └── jsonStorage.js
 └── front/                  # Interface Frontend (Client & Restaurateur)
     ├── index.html          # Structure HTML5 & Tailwind CSS
     └── app.js              # Logique cliente, requêtes API, gestion d'état & filtres

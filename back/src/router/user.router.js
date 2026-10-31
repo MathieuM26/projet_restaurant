@@ -1,34 +1,25 @@
 import { Router } from "express";
-import userRepository from "../repository/userMemory.repository.js";
+import userService from "../services/user.service.js";
 
 const userRouter = Router();
 
 // POST /api/users/login
 userRouter.post("/login", (req, res) => {
-  const { email } = req.body;
-  if (!email) {
-    return res.status(400).json({ error: "L'adresse email est requise." });
+  const result = userService.authenticate(req.body.email);
+  if (result.error) {
+    return res.status(result.status).json({ error: result.error });
   }
-  const user = userRepository.getByEmail(email);
-  if (!user || !user.active) {
-    return res.status(401).json({ error: "Identifiant invalide ou compte inactif." });
-  }
-  res.status(200).json({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role
-  });
+  res.status(result.status).json(result.data);
 });
 
 // GET /api/users
 userRouter.get("/", (req, res) => {
-  res.status(200).json(userRepository.getAllUsers());
+  res.status(200).json(userService.getAllUsers());
 });
 
 // GET /api/users/:id
 userRouter.get("/:id", (req, res) => {
-  const user = userRepository.getById(req.params.id);
+  const user = userService.getById(req.params.id);
   if (!user) {
     return res.status(404).json({ message: "Utilisateur introuvable." });
   }
@@ -37,13 +28,13 @@ userRouter.get("/:id", (req, res) => {
 
 // POST /api/users
 userRouter.post("/", (req, res) => {
-  const newUser = userRepository.create(req.body);
+  const newUser = userService.create(req.body);
   res.status(201).json(newUser);
 });
 
 // DELETE /api/users/:id
 userRouter.delete("/:id", (req, res) => {
-  const deleted = userRepository.deleteById(req.params.id);
+  const deleted = userService.deleteById(req.params.id);
   if (!deleted) {
     return res.status(404).json({ message: "Utilisateur introuvable." });
   }
