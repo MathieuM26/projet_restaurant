@@ -1,12 +1,13 @@
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import db from "../database/sqlite.js";
 import tableRepository from "./tableMemory.repository.js";
-import { loadData, saveData } from "../storage/jsonStorage.js";
 
-class ReservationMemoryRepository {
-  // Durée estimée du repas : 1h30 (90 min)
-  MEAL_DURATION_MS = 90 * 60 * 1000;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LEGACY_JSON_PATH = path.join(__dirname, "..", "..", "data", "reservations.json");
 
-  // Chargées depuis back/data/reservations.json (les données ci-dessous ne servent qu'au premier lancement)
-  reservations = loadData("reservations", [
+const DEFAULT_RESERVATIONS = [
     
     // --- SERVICE DU MIDI (12h00 - 14h00) ---
     {
@@ -375,38 +376,81 @@ class ReservationMemoryRepository {
       endTime: "2026-10-15T22:30:00.000Z",
       status: "Confirmed"
     }
-  ]);
+];
 
-  // Enregistre les réservations sur le disque (appelé après chaque modification)
-  save() {
-    saveData("reservations", this.reservations);
+class ReservationRepository {
+  // Durée estimée du repas : 1h30 (90 min)
+  MEAL_DURATION_MS = 90 * 60 * 1000;
+
+  constructor() {
+    this.seedIfEmpty();
   }
 
-  // Génère le code suivant dans la séquence (ex: res-30 -> res-31)
-  // On ne prend en compte que les codes au format "res-<nombre>"
+  // Initialise la table SQL "reservations" si elle est vide (importe reservations.json s'il existe, sinon DEFAULT_RESERVATIONS)
+  seedIfEmpty() {
+    const { count } = db.prepare("SELECT COUNT(*) AS count FROM reservations").get();
+    if (count > 0) return;
+
+    let initialData = DEFAULT_RESERVATIONS;
+    if (fs.existsSync(LEGACY_JSON_PATH)) {
+      try {
+        initialData = JSON.parse(fs.readFileSync(LEGACY_JSON_PATH, "utf-8"));
+      } catch (e) {
+        initialData = DEFAULT_RESERVATIONS;
+      }
+    }
+
+    const insert = db.prepare(`
+      INSERT INTO reservations (
+        id, tableId, tableName, guestName, guestEmail, guestPhone,
+        guestCount, guestMessage, startTime, endTime, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const r of initialData) {
+      insert.run(
+        r.id,
+        String(r.tableId),
+        r.tableName,
+        r.guestName,
+        r.guestEmail,
+        r.guestPhone,
+        Number(r.guestCount),
+        (r.guestMessage || "").toString(),
+        r.startTime,
+        r.endTime,
+        r.status || "Confirmed"
+      );
+    }
+  }
+
+  // Génère le code suivant dans la séquence (ex: res-30 -> res-31) à partir de la base SQLite
   generateShortCode() {
-    const maxNumber = this.reservations.reduce((max, r) => {
-      const match = /^res-(\d+)$/.exec(r.id);
+    const rows = db.prepare("SELECT id FROM reservations").all();
+    const maxNumber = rows.reduce((max, r) => {
+      const match = /^res-(\d+)$/i.exec(r.id);
       return match ? Math.max(max, Number(match[1])) : max;
     }, 0);
 
     let next = maxNumber + 1;
     let code = `res-${String(next).padStart(2, "0")}`;
-    while (this.getById(code)) { // Sécurité : ne jamais réutiliser un code existant
+    while (this.getById(code)) {
       next++;
       code = `res-${String(next).padStart(2, "0")}`;
     }
     return code;
   }
+
   getAll() {
-    return this.reservations.map(r => this.withLiveStatus(r));
+    const rows = db.prepare("SELECT * FROM reservations").all();
+    return rows.map(r => this.withLiveStatus(r));
   }
 
   // Calcule le statut en fonction de l'heure actuelle :
-  //  - Cancelled : annulée (seul statut stocké qui est conservé tel quel)
-  //  - Completed : le créneau est terminé (heure de fin dépassée)
-  //  - Seated    : le client est à table (entre l'heure de début et l'heure de fin)
-  //  - Confirmed : la réservation est à venir
+  //  - Cancelled : annulée
+  //  - Completed : créneau terminé
+  //  - Seated    : client actuellement à table
+  //  - Confirmed : réservation à venir
   computeStatus(reservation, now = Date.now()) {
     if (reservation.status === "Cancelled") return "Cancelled";
     const start = new Date(reservation.startTime).getTime();
@@ -416,40 +460,47 @@ class ReservationMemoryRepository {
     return "Confirmed";
   }
 
-  // Renvoie une copie de la réservation avec son statut à jour (sans modifier l'original)
   withLiveStatus(reservation) {
     if (!reservation) return reservation;
-    return { ...reservation, status: this.computeStatus(reservation) };
+    return { ...reservation, guestCount: Number(reservation.guestCount), status: this.computeStatus(reservation) };
   }
 
-  // Recherche insensible à la casse (res-12 ou RES-12 fonctionnent)
+  // Recherche SQL insensible à la casse (res-12 ou RES-12)
   getById(id) {
     if (!id) return null;
-    return this.reservations.find(r => r.id.toLowerCase() === id.toLowerCase());
+    const row = db
+      .prepare("SELECT * FROM reservations WHERE LOWER(id) = LOWER(?)")
+      .get(String(id).trim());
+    return row ? { ...row, guestCount: Number(row.guestCount) } : null;
   }
 
-  // Vérifie si une table est occupée (ignore la réservation en cours si on la modifie)
+  // Vérifie en SQL si une table est déjà occupée sur le créneau demandé
   isTableOccupied(tableId, startRequested, endRequested, excludeReservationId = null) {
-    return this.reservations.some(res => {
-      if (res.tableId !== tableId || res.status === "Cancelled" || res.id === excludeReservationId) {
+    const rows = db
+      .prepare(
+        "SELECT id, startTime, endTime FROM reservations WHERE tableId = ? AND status != 'Cancelled'"
+      )
+      .all(String(tableId));
+
+    return rows.some(res => {
+      if (excludeReservationId && res.id.toLowerCase() === excludeReservationId.toLowerCase()) {
         return false;
       }
       const resStart = new Date(res.startTime).getTime();
       const resEnd = new Date(res.endTime).getTime();
-
       return startRequested < resEnd && endRequested > resStart;
     });
   }
 
-  // Création avec code court et assignation automatique
+  // Création d'une réservation avec insertion SQL
   createReservation(data) {
     const startRequested = new Date(data.dateTime).getTime();
     const endRequested = startRequested + this.MEAL_DURATION_MS;
     const guestCount = Number(data.guestCount);
 
     const candidateTables = tableRepository.getEligibleTables(guestCount);
-    const freeTable = candidateTables.find(table => 
-      !this.isTableOccupied(table.id, startRequested, endRequested)
+    const freeTable = candidateTables.find(
+      table => !this.isTableOccupied(table.id, startRequested, endRequested)
     );
 
     if (!freeTable) {
@@ -457,64 +508,100 @@ class ReservationMemoryRepository {
     }
 
     const newReservation = {
-      id: this.generateShortCode(), // Ex: res-31
-      tableId: freeTable.id,
+      id: this.generateShortCode(),
+      tableId: String(freeTable.id),
       tableName: freeTable.number,
       guestName: data.guestName,
       guestEmail: data.guestEmail,
       guestPhone: data.guestPhone,
-      guestCount: guestCount,
-      guestMessage: (data.guestMessage || "").toString().trim().slice(0, 500), // Message libre (allergies, occasion...)
+      guestCount,
+      guestMessage: (data.guestMessage || "").toString().trim().slice(0, 500),
       startTime: new Date(startRequested).toISOString(),
       endTime: new Date(endRequested).toISOString(),
       status: "Confirmed"
     };
 
-    this.reservations.push(newReservation);
-    this.save();
+    db.prepare(`
+      INSERT INTO reservations (
+        id, tableId, tableName, guestName, guestEmail, guestPhone,
+        guestCount, guestMessage, startTime, endTime, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      newReservation.id,
+      newReservation.tableId,
+      newReservation.tableName,
+      newReservation.guestName,
+      newReservation.guestEmail,
+      newReservation.guestPhone,
+      newReservation.guestCount,
+      newReservation.guestMessage,
+      newReservation.startTime,
+      newReservation.endTime,
+      newReservation.status
+    );
+
     return newReservation;
   }
 
-  // Modifier une réservation existante (recalcule la meilleure table disponible)
+  // Modification d'une réservation existante avec UPDATE SQL
   updateReservation(id, data) {
     const existing = this.getById(id);
     if (!existing || existing.status === "Cancelled") return null;
 
-    const startRequested = data.dateTime ? new Date(data.dateTime).getTime() : new Date(existing.startTime).getTime();
+    const startRequested = data.dateTime
+      ? new Date(data.dateTime).getTime()
+      : new Date(existing.startTime).getTime();
     const endRequested = startRequested + this.MEAL_DURATION_MS;
     const guestCount = data.guestCount ? Number(data.guestCount) : existing.guestCount;
 
-    // Chercher une table disponible (en ignorant la réservation actuelle pour ne pas se bloquer soi-même)
     const candidateTables = tableRepository.getEligibleTables(guestCount);
-    const freeTable = candidateTables.find(table => 
-      !this.isTableOccupied(table.id, startRequested, endRequested, existing.id)
+    const freeTable = candidateTables.find(
+      table => !this.isTableOccupied(table.id, startRequested, endRequested, existing.id)
     );
 
     if (!freeTable) {
       return { conflict: true };
     }
 
-    existing.guestName = data.guestName || existing.guestName;
-    if (data.guestMessage !== undefined) {
-      existing.guestMessage = data.guestMessage.toString().trim().slice(0, 500);
-    }
-    existing.guestCount = guestCount;
-    existing.tableId = freeTable.id;
-    existing.tableName = freeTable.number;
-    existing.startTime = new Date(startRequested).toISOString();
-    existing.endTime = new Date(endRequested).toISOString();
+    const updated = {
+      ...existing,
+      guestName: data.guestName || existing.guestName,
+      guestMessage:
+        data.guestMessage !== undefined
+          ? data.guestMessage.toString().trim().slice(0, 500)
+          : existing.guestMessage || "",
+      guestCount,
+      tableId: String(freeTable.id),
+      tableName: freeTable.number,
+      startTime: new Date(startRequested).toISOString(),
+      endTime: new Date(endRequested).toISOString()
+    };
 
-    this.save();
-    return existing;
+    db.prepare(`
+      UPDATE reservations
+      SET guestName = ?, guestMessage = ?, guestCount = ?, tableId = ?, tableName = ?, startTime = ?, endTime = ?
+      WHERE id = ?
+    `).run(
+      updated.guestName,
+      updated.guestMessage,
+      updated.guestCount,
+      updated.tableId,
+      updated.tableName,
+      updated.startTime,
+      updated.endTime,
+      existing.id
+    );
+
+    return updated;
   }
 
+  // Annulation d'une réservation en SQL
   deleteById(id) {
-    const res = this.getById(id);
-    if (!res) return false;
-    res.status = "Cancelled";
-    this.save();
+    const existing = this.getById(id);
+    if (!existing) return false;
+    db.prepare("UPDATE reservations SET status = 'Cancelled' WHERE id = ?").run(existing.id);
     return true;
   }
 }
 
-export default new ReservationMemoryRepository();
+export default new ReservationRepository();
