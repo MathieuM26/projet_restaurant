@@ -1,9 +1,8 @@
-import { isEmail, isInt, isNotEmpty, max, min } from "class-validator";
 import reservationRepository from "../repository/reservationMemory.repository.js";
 import mailService from "./mail.service.js";
 
 class ReservationService {
-  // Vérifie si l'horaire est compris dans les services d'ouverture du restaurant
+  // Règle métier : vérifie si l'horaire est dans les heures d'ouverture du restaurant
   isWithinOpeningHours(parsedDate) {
     const timeInMinutes = parsedDate.getHours() * 60 + parsedDate.getMinutes();
     const isLunch = timeInMinutes >= 11 * 60 + 30 && timeInMinutes <= 14 * 60;  // 11h30 à 14h00
@@ -25,21 +24,7 @@ class ReservationService {
   }
 
   createReservation(data) {
-    const { guestName, guestEmail, guestPhone, guestCount, dateTime } = data;
-
-    if (!isNotEmpty(guestName) || !isNotEmpty(guestEmail) || !isNotEmpty(guestPhone) || !isNotEmpty(dateTime) || guestCount === undefined) {
-      return { status: 400, error: "Tous les champs sont obligatoires." };
-    }
-
-    // Validation du format de l'adresse email via class-validator (avant enregistrement SQL et appel Brevo)
-    if (!isEmail(String(guestEmail).trim())) {
-      return { status: 400, error: "Le format de l'adresse email est invalide." };
-    }
-
-    const count = Number(guestCount);
-    if (!isInt(count) || !min(count, 1) || !max(count, 8)) {
-      return { status: 400, error: "Le nombre de couverts doit être un entier compris entre 1 et 8." };
-    }
+    const { guestEmail, dateTime } = data;
 
     const parsedDate = new Date(dateTime);
     if (isNaN(parsedDate.getTime()) || parsedDate.getTime() < Date.now()) {
@@ -75,13 +60,6 @@ class ReservationService {
 
   updateReservation(id, data) {
     const { guestCount, dateTime, guestName, guestMessage } = data;
-
-    if (guestCount !== undefined) {
-      const count = Number(guestCount);
-      if (!isInt(count) || !min(count, 1) || !max(count, 8)) {
-        return { status: 400, error: "Le nombre de couverts doit être un entier compris entre 1 et 8." };
-      }
-    }
 
     if (dateTime) {
       const parsedDate = new Date(dateTime);

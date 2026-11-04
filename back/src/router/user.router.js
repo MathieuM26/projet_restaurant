@@ -1,11 +1,21 @@
 import { Router } from "express";
+import { isEmail, isNotEmpty } from "class-validator";
 import userService from "../services/user.service.js";
 
 const userRouter = Router();
 
-// POST /api/users/login
+// POST /api/users/login (Validation du format de l'email dans le routeur avec class-validator)
 userRouter.post("/login", (req, res) => {
-  const result = userService.authenticate(req.body.email);
+  const { email } = req.body;
+
+  if (!isNotEmpty(email)) {
+    return res.status(400).json({ error: "L'adresse email est requise." });
+  }
+  if (!isEmail(String(email).trim())) {
+    return res.status(400).json({ error: "Le format de l'adresse email est invalide." });
+  }
+
+  const result = userService.authenticate(email);
   if (result.error) {
     return res.status(result.status).json({ error: result.error });
   }
