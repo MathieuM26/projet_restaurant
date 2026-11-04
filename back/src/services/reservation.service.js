@@ -1,3 +1,4 @@
+import { isEmail, isInt, isNotEmpty, max, min } from "class-validator";
 import reservationRepository from "../repository/reservationMemory.repository.js";
 import mailService from "./mail.service.js";
 
@@ -26,13 +27,18 @@ class ReservationService {
   createReservation(data) {
     const { guestName, guestEmail, guestPhone, guestCount, dateTime } = data;
 
-    if (!guestName || !guestEmail || !guestPhone || !guestCount || !dateTime) {
+    if (!isNotEmpty(guestName) || !isNotEmpty(guestEmail) || !isNotEmpty(guestPhone) || !isNotEmpty(dateTime) || guestCount === undefined) {
       return { status: 400, error: "Tous les champs sont obligatoires." };
     }
 
+    // Validation du format de l'adresse email via class-validator (avant enregistrement SQL et appel Brevo)
+    if (!isEmail(String(guestEmail).trim())) {
+      return { status: 400, error: "Le format de l'adresse email est invalide." };
+    }
+
     const count = Number(guestCount);
-    if (isNaN(count) || count < 1 || count > 8) {
-      return { status: 400, error: "Le nombre de couverts doit être compris entre 1 et 8." };
+    if (!isInt(count) || !min(count, 1) || !max(count, 8)) {
+      return { status: 400, error: "Le nombre de couverts doit être un entier compris entre 1 et 8." };
     }
 
     const parsedDate = new Date(dateTime);
@@ -47,12 +53,15 @@ class ReservationService {
       };
     }
 
-    const reservation = reservationRepository.createReservation(data);
+    const reservation = reservationRepository.createReservation({
+      ...data,
+      guestEmail: String(guestEmail).trim()
+    });
     if (!reservation) {
       return { status: 409, error: "Aucune table disponible pour ce créneau." };
     }
 
-    // Envoi de l'email de confirmation via le service Mail (mode démo)
+    // Envoi de l'email de confirmation via le service Mail (Brevo / Mode Démo)
     const emailPreviewUrl = mailService.sendConfirmationEmail(reservation);
 
     return {
@@ -69,8 +78,8 @@ class ReservationService {
 
     if (guestCount !== undefined) {
       const count = Number(guestCount);
-      if (isNaN(count) || count < 1 || count > 8) {
-        return { status: 400, error: "Le nombre de couverts doit être compris entre 1 et 8." };
+      if (!isInt(count) || !min(count, 1) || !max(count, 8)) {
+        return { status: 400, error: "Le nombre de couverts doit être un entier compris entre 1 et 8." };
       }
     }
 
