@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { isInt, isNotEmpty, min } from "class-validator";
 import tableService from "../services/table.service.js";
+import { validateCreateTable } from "./tables.validation.js";
 
 const tablesRouter = Router();
 
@@ -18,15 +18,8 @@ tablesRouter.get("/:id", (req, res) => {
   res.status(200).json(table);
 });
 
-// POST /api/tables (Validation du format dans le routeur avec class-validator)
-tablesRouter.post("/", (req, res) => {
-  const { number, capacity } = req.body;
-  const cap = Number(capacity);
-
-  if (!isNotEmpty(number) || !isInt(cap) || !min(cap, 1)) {
-    return res.status(400).json({ message: "Numéro et capacité valide (>= 1) requis." });
-  }
-
+// POST /api/tables
+tablesRouter.post("/", validateCreateTable, (req, res) => {
   const result = tableService.create(req.body);
   res.status(result.status).json(result.data);
 });
